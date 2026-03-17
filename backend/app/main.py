@@ -148,7 +148,7 @@ async def create_session(
     if metadata.get("is_live"):
         bg.add_task(process_live_stream, session_id, video_id)
     else:
-        bg.add_task(process_session, session_id, video_id, req.transcription_tier)
+        bg.add_task(process_session, session_id, video_id, req.transcription_tier, req.auto_summarize)
 
     return SessionResponse(
         session_id=session_id,
