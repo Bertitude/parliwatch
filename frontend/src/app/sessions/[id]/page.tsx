@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo, use } from "react";
 import type ReactPlayerType from "react-player";
-import { ArrowLeft, AlertCircle, Loader2, Clock, Calendar, Tv2, Radio, StopCircle, ListOrdered } from "lucide-react";
+import { ArrowLeft, AlertCircle, Loader2, Clock, Calendar, Tv2, Radio, StopCircle, ListOrdered, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
@@ -12,6 +12,7 @@ import {
   triggerSummarize,
   getLiveTranscriptUrl,
   stopLiveTranscription,
+  retrySession,
   getSummaryDownloadUrl,
   type SessionDetail,
   type TranscriptSegment,
@@ -41,6 +42,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [summaryFailed, setSummaryFailed] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Poll session status until complete/failed/live
@@ -119,6 +121,19 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     }
   };
 
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await retrySession(id);
+      // Reset local state and restart polling
+      setError(null);
+      setLoadingSession(true);
+      setRetrying(false);
+    } catch {
+      setRetrying(false);
+    }
+  };
+
   const handleRequestSummary = async () => {
     setLoadingSummary(true);
     setSummaryFailed(false);
@@ -167,9 +182,23 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         <AlertCircle className="w-12 h-12 text-red-400 mx-auto" />
         <h2 className="text-xl font-semibold text-gray-800">Processing Failed</h2>
         <p className="text-gray-500 text-sm">{error}</p>
-        <Link href="/" className="text-parliament-navy hover:underline text-sm">
-          Back to Home
-        </Link>
+        <div className="flex items-center justify-center gap-3">
+          <button
+            onClick={handleRetry}
+            disabled={retrying}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-parliament-navy text-white text-sm font-semibold hover:bg-parliament-navy/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {retrying ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RotateCcw className="w-4 h-4" />
+            )}
+            {retrying ? "Retrying…" : "Retry Transcription"}
+          </button>
+          <Link href="/" className="text-sm text-gray-500 hover:text-parliament-navy transition-colors">
+            Back to Home
+          </Link>
+        </div>
       </div>
     );
   }
