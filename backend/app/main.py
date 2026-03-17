@@ -3,6 +3,7 @@ import io
 import json
 import uuid
 import zipfile
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -514,3 +515,26 @@ async def preview_url(url: str):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "version": "2.0"}
+
+
+# ── Log viewer ────────────────────────────────────────────────────────────────
+
+# Logs live at <project_root>/logs/ — two levels up from backend/app/
+_LOGS_DIR = Path(__file__).resolve().parent.parent.parent / "logs"
+_ALLOWED_SERVICES = {"backend", "frontend"}
+
+
+@app.get("/api/logs")
+async def get_logs(service: str = "backend", lines: int = 200):
+    """Return the last `lines` lines from logs/<service>.log."""
+    if service not in _ALLOWED_SERVICES:
+        raise HTTPException(400, f"service must be one of {_ALLOWED_SERVICES}")
+    log_file = _LOGS_DIR / f"{service}.log"
+    if not log_file.exists():
+        return {"service": service, "lines": [], "note": "Log file not found — start the app with start.bat first."}
+    try:
+        text = log_file.read_text(encoding="utf-8", errors="replace")
+        all_lines = text.splitlines()
+        return {"service": service, "lines": all_lines[-lines:], "total": len(all_lines)}
+    except Exception as exc:
+        raise HTTPException(500, f"Could not read log file: {exc}")
