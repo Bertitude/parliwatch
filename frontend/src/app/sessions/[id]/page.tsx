@@ -47,6 +47,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [error, setError] = useState<string | null>(null);
   const [backfillStatus, setBackfillStatus] = useState<"idle" | "running" | "complete" | "error">("idle");
   const [backfillProgress, setBackfillProgress] = useState({ processed: 0, total: 0 });
+  const [summarizingFor, setSummarizingFor] = useState(0); // seconds spent in "summarizing" state
+  const summarizingTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Poll session status until complete/failed/live
   // retryCount is included so a manual retry restarts this effect cleanly
@@ -60,6 +62,9 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
         setLoadingSession(false);
 
         if (s.status === "complete") {
+          // Clear any stuck-summary timer
+          if (summarizingTimerRef.current) clearInterval(summarizingTimerRef.current);
+          setSummarizingFor(0);
           const segs = await getTranscript(id);
           setSegments(segs);
           getSummary(id)
@@ -73,7 +78,18 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           // Keep polling so we notice when live → complete
           timer = setTimeout(fetchSession, POLL_INTERVAL);
         } else if (s.status === "failed") {
+          if (summarizingTimerRef.current) clearInterval(summarizingTimerRef.current);
+          setSummarizingFor(0);
           setError(s.error_message ?? "Processing failed");
+        } else if (s.status === "summarizing") {
+          // Start a counter so the UI can offer a retry if it runs too long
+          if (!summarizingTimerRef.current) {
+            summarizingTimerRef.current = setInterval(
+              () => setSummarizingFor((n) => n + 1),
+              1000,
+            );
+          }
+          timer = setTimeout(fetchSession, POLL_INTERVAL);
         } else {
           timer = setTimeout(fetchSession, POLL_INTERVAL);
         }
@@ -84,7 +100,13 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     };
 
     fetchSession();
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (summarizingTimerRef.current) {
+        clearInterval(summarizingTimerRef.current);
+        summarizingTimerRef.current = null;
+      }
+    };
   }, [id, retryCount]);
 
   // Subscribe to SSE for real-time segments when session is live
@@ -153,6 +175,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       setRetrying(false);
       setBackfillStatus("idle");
       setBackfillProgress({ processed: 0, total: 0 });
+      setSummarizingFor(0);
+      if (summarizingTimerRef.current) {
+        clearInterval(summarizingTimerRef.current);
+        summarizingTimerRef.current = null;
+      }
       setRetryCount((c) => c + 1);
     } catch {
       setRetrying(false);
@@ -289,7 +316,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
           ) : (
             <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
           )}
-          <div>
+          <div className="flex-1">
             {session?.queue_position > 0 ? (
               <>
                 <p className="text-sm font-medium text-amber-800">
@@ -308,6 +335,21 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
               </>
             )}
           </div>
+          {/* Offer a retry button if summarization has been running for > 90 s */}
+          {session?.status === "summarizing" && summarizingFor >= 90 && (
+            <button
+              onClick={handleRequestSummary}
+              disabled={loadingSummary}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs font-semibold transition-colors disabled:opacity-50 flex-shrink-0"
+            >
+              {loadingSummary ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <RotateCcw className="w-3.5 h-3.5" />
+              )}
+              Retry Summary
+            </button>
+          )}
         </div>
       )}
 
