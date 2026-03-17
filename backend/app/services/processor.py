@@ -58,7 +58,7 @@ async def _save_api_usage(
     await db.commit()
 
 
-async def process_session(session_id: str, video_id: str, tier: str):
+async def process_session(session_id: str, video_id: str, tier: str, auto_summarize: bool = False):
     """Main processing pipeline — free captions or OpenAI API."""
     try:
         await _update_status(session_id, "extracting")
@@ -114,6 +114,9 @@ async def process_session(session_id: str, video_id: str, tier: str):
 
             finally:
                 cleanup_audio(audio_path)
+
+        if auto_summarize:
+            await generate_summary(session_id)
 
     except Exception as e:
         logger.exception(f"process_session failed for {session_id}")
