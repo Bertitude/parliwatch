@@ -1,0 +1,367 @@
+"use client";
+
+import { useEffect, useRef, useState, useCallback, useMemo, use } from "react";
+import type ReactPlayerType from "react-player";
+import { ArrowLeft, AlertCircle, Loader2, Clock, Calendar, Tv2, Radio, StopCircle } from "lucide-react";
+import Link from "next/link";
+import dynamic from "next/dynamic";
+import {
+  getSession,
+  getTranscript,
+  getSummary,
+  triggerSummarize,
+  getLiveTranscriptUrl,
+  stopLiveTranscription,
+  getSummaryDownloadUrl,
+  type SessionDetail,
+  type TranscriptSegment,
+  type Summary,
+} from "@/lib/api";
+import TranscriptPanel from "@/components/TranscriptPanel";
+import SearchBar from "@/components/SearchBar";
+import ExportMenu from "@/components/ExportMenu";
+import SummaryPanel from "@/components/SummaryPanel";
+import { formatDuration } from "@/lib/utils";
+
+const VideoPlayer = dynamic(() => import("@/components/VideoPlayer"), { ssr: false });
+
+const POLL_INTERVAL = 3000;
+
+export default function SessionPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const playerRef = useRef<ReactPlayerType | null>(null);
+
+  const [session, setSession] = useState<SessionDetail | null>(null);
+  const [segments, setSegments] = useState<TranscriptSegment[]>([]);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"transcript" | "summary">("transcript");
+  const [loadingSession, setLoadingSession] = useState(true);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+  const [summaryFailed, setSummaryFailed] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Poll session status until complete/failed/live
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+
+    const fetchSession = async () => {
+      try {
+        const s = await getSession(id);
+        setSession(s);
+        setLoadingSession(false);
+
+        if (s.status === "complete") {
+          const segs = await getTranscript(id);
+          setSegments(segs);
+          getSummary(id)
+            .then(setSummary)
+            .catch(() => null);
+        } else if (s.status === "live") {
+          // Load any already-transcribed segments so far
+          getTranscript(id)
+            .then(setSegments)
+            .catch(() => null);
+          // Keep polling so we notice when live → complete
+          timer = setTimeout(fetchSession, POLL_INTERVAL);
+        } else if (s.status === "failed") {
+          setError(s.error_message ?? "Processing failed");
+        } else {
+          timer = setTimeout(fetchSession, POLL_INTERVAL);
+        }
+      } catch {
+        setError("Failed to load session");
+        setLoadingSession(false);
+      }
+    };
+
+    fetchSession();
+    return () => clearTimeout(timer);
+  }, [id]);
+
+  // Subscribe to SSE for real-time segments when session is live
+  useEffect(() => {
+    if (!session || session.status !== "live") return;
+
+    const url = getLiveTranscriptUrl(id);
+    const es = new EventSource(url);
+
+    es.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "segments") {
+          setSegments((prev) => [...prev, ...msg.data]);
+        } else if (msg.type === "done" || msg.type === "error") {
+          es.close();
+        }
+      } catch {
+        // ignore parse errors
+      }
+    };
+
+    es.onerror = () => es.close();
+
+    return () => es.close();
+  }, [id, session?.status]);
+
+  const handleSeek = useCallback((t: number) => {
+    playerRef.current?.seekTo(t, "seconds");
+  }, []);
+
+  const handleStop = async () => {
+    setStopping(true);
+    try {
+      await stopLiveTranscription(id);
+    } catch {
+      setStopping(false);
+    }
+  };
+
+  const handleRequestSummary = async () => {
+    setLoadingSummary(true);
+    setSummaryFailed(false);
+    try {
+      await triggerSummarize(id);
+      // Poll for summary — give up after ~90 seconds (22 attempts × 4s)
+      const MAX_ATTEMPTS = 22;
+      const poll = async (attempt = 0) => {
+        if (attempt >= MAX_ATTEMPTS) {
+          setLoadingSummary(false);
+          setSummaryFailed(true);
+          return;
+        }
+        try {
+          const s = await getSummary(id);
+          setSummary(s);
+          setLoadingSummary(false);
+        } catch {
+          setTimeout(() => poll(attempt + 1), 4000);
+        }
+      };
+      setTimeout(() => poll(0), 4000);
+    } catch {
+      setLoadingSummary(false);
+    }
+  };
+
+  const filteredCount = useMemo(() => {
+    if (!search.trim()) return segments.length;
+    const q = search.toLowerCase();
+    return segments.filter((s) => s.text.toLowerCase().includes(q)).length;
+  }, [segments, search]);
+
+  if (loadingSession) {
+    return (
+      <div className="flex items-center justify-center min-h-64 gap-2 text-gray-400">
+        <Loader2 className="w-6 h-6 animate-spin" />
+        <span>Loading session...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-xl mx-auto mt-12 text-center space-y-4">
+        <AlertCircle className="w-12 h-12 text-red-400 mx-auto" />
+        <h2 className="text-xl font-semibold text-gray-800">Processing Failed</h2>
+        <p className="text-gray-500 text-sm">{error}</p>
+        <Link href="/" className="text-parliament-navy hover:underline text-sm">
+          Back to Home
+        </Link>
+      </div>
+    );
+  }
+
+  const isLive = session?.status === "live";
+  const isPending = session?.status !== "complete" && !isLive;
+
+  return (
+    <div className="space-y-4">
+      {/* Back nav */}
+      <Link
+        href="/"
+        className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-parliament-navy transition-colors"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        All Sessions
+      </Link>
+
+      {/* Session metadata */}
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="flex items-start gap-3 mb-3">
+          <h1 className="text-xl font-bold text-gray-900 flex-1">
+            {session?.title ?? "Loading..."}
+          </h1>
+          {isLive && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-100 text-red-700 text-xs font-semibold flex-shrink-0 animate-pulse">
+              <Radio className="w-3 h-3" />
+              LIVE
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-4 text-sm text-gray-500">
+          {session?.channel && (
+            <div className="flex items-center gap-1.5">
+              <Tv2 className="w-4 h-4" />
+              {session.channel}
+            </div>
+          )}
+          {session?.duration && (
+            <div className="flex items-center gap-1.5">
+              <Clock className="w-4 h-4" />
+              {formatDuration(session.duration)}
+            </div>
+          )}
+          {session?.upload_date && (
+            <div className="flex items-center gap-1.5">
+              <Calendar className="w-4 h-4" />
+              {session.upload_date}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Processing state */}
+      {isPending && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3">
+          <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-blue-800 capitalize">
+              {session?.status ?? "Processing"}...
+            </p>
+            <p className="text-xs text-blue-600">This page will update automatically.</p>
+          </div>
+        </div>
+      )}
+
+      {/* Live banner */}
+      {isLive && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center gap-3">
+          <Radio className="w-5 h-5 text-red-500 flex-shrink-0 animate-pulse" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-red-800">Live transcription in progress</p>
+            <p className="text-xs text-red-600">
+              New segments appear automatically every ~30 seconds.
+            </p>
+          </div>
+          <button
+            onClick={handleStop}
+            disabled={stopping}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-xs font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+          >
+            {stopping ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <StopCircle className="w-3.5 h-3.5" />
+            )}
+            {stopping ? "Stopping…" : "Stop"}
+          </button>
+        </div>
+      )}
+
+      {/* Main layout */}
+      {(!isPending || isLive) && session && (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+          {/* Left: video only */}
+          <div className="lg:col-span-2">
+            <VideoPlayer
+              videoId={session.video_id}
+              onTimeUpdate={setCurrentTime}
+              playerRef={playerRef}
+            />
+          </div>
+
+          {/* Right: tabbed transcript + summary */}
+          <div className="lg:col-span-3 bg-white rounded-xl border border-gray-200 flex flex-col max-h-[80vh]">
+            {/* Tab bar */}
+            <div className="flex border-b border-gray-200 flex-shrink-0">
+              {(["transcript", "summary"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex-1 py-2.5 text-sm font-medium capitalize transition-colors ${
+                    activeTab === tab
+                      ? "text-parliament-navy border-b-2 border-parliament-navy"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            {activeTab === "transcript" ? (
+              <>
+                {/* Transcript toolbar */}
+                <div className="flex items-center gap-3 p-4 border-b border-gray-200 flex-shrink-0">
+                  <div className="flex-1">
+                    <SearchBar
+                      value={search}
+                      onChange={setSearch}
+                      resultCount={search ? filteredCount : undefined}
+                    />
+                  </div>
+                  <ExportMenu sessionId={id} segments={segments} />
+                </div>
+
+                {/* Source badge */}
+                {segments[0]?.source && (
+                  <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 text-xs text-gray-400 flex-shrink-0">
+                    Source: {segments[0].source} · {segments.length} segments
+                  </div>
+                )}
+
+                {/* Scrollable transcript */}
+                <div className="flex-1 overflow-y-auto">
+                  <TranscriptPanel
+                    segments={segments}
+                    currentTime={currentTime}
+                    searchQuery={search}
+                    onSegmentClick={handleSeek}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Summary toolbar — only shown when a summary exists */}
+                {summary && (
+                  <div className="flex items-center justify-end gap-2 px-4 py-2 border-b border-gray-200 flex-shrink-0">
+                    <span className="text-xs text-gray-400 mr-auto">Export summary</span>
+                    <a
+                      href={getSummaryDownloadUrl(id, "md")}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-gray-700"
+                    >
+                      .md
+                    </a>
+                    <a
+                      href={getSummaryDownloadUrl(id, "docx")}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors text-gray-700"
+                    >
+                      .docx
+                    </a>
+                  </div>
+                )}
+                <div className="flex-1 overflow-y-auto p-4">
+                  <SummaryPanel
+                    summary={summary}
+                    loading={loadingSummary}
+                    failed={summaryFailed}
+                    onSeek={handleSeek}
+                    onRequestSummary={handleRequestSummary}
+                    canRequest={!summary && !loadingSummary}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

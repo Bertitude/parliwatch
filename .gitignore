@@ -1,0 +1,63 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+venv/
+.venv/
+env/
+.env/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+!.env.example
+cookies.txt
+
+# ── Node / Next.js ────────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+.turbo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Temp / generated ──────────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.swp
+*.swo
+tmp/
+temp/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.sublime-*
+
+# ── Next.js local env ─────────────────────────────────────────────────────────
+frontend/.env.local
+frontend/.env*.local
+
+# ── Claude Code ───────────────────────────────────────────────────────────────
+.claude/

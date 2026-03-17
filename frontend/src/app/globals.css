@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --parliament-green: #006B3F;
+  --parliament-gold: #FDB913;
+  --parliament-navy: #003087;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+.segment-active {
+  @apply bg-parliament-gold/20 border-l-4 border-parliament-gold;
+}
+
+.segment-hover {
+  @apply hover:bg-gray-100 cursor-pointer transition-colors;
+}
