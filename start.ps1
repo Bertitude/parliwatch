@@ -36,7 +36,7 @@ if ($dockerProc.ExitCode -ne 0) {
 # Backend
 Write-Host "[2/3] Starting backend (logs\backend.log)..."
 $backendLog = Join-Path $logsDir "backend.log"
-$backendCmd = "cd /d `"$root\backend`" && call `"$root\backend\venv\Scripts\activate`" && uvicorn app.main:app --reload >> `"$backendLog`" 2>&1"
+$backendCmd = "cd /d `"$root\backend`" && call `"$root\backend\venv\Scripts\activate`" && set PYTHONIOENCODING=utf-8 && uvicorn app.main:app --reload >> `"$backendLog`" 2>&1"
 Start-Process -FilePath "cmd" -ArgumentList "/c $backendCmd" -WindowStyle Hidden
 
 Start-Sleep -Seconds 2
