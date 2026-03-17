@@ -24,7 +24,7 @@ if errorlevel 1 (
 
 :: ── Pull latest ───────────────────────────────────────────────────────────────
 echo [2/5] Pulling latest from GitHub...
-git pull origin develop
+git pull origin master
 if errorlevel 1 (
     echo.
     echo   ERROR: git pull failed. Check your connection and try again.
