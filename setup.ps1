@@ -117,6 +117,14 @@ Write-Host "    Installing npm packages (this may take a minute)..."
 npm install --silent
 Write-OK "npm packages installed"
 
+# Copy .env.local if missing
+if (-not (Test-Path ".env.local")) {
+    Copy-Item ".env.local.example" ".env.local"
+    Write-OK ".env.local created from template"
+} else {
+    Write-OK ".env.local already exists"
+}
+
 # ── Done ───────────────────────────────────────────────────────────────────────
 
 Set-Location $root
