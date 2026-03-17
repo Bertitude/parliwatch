@@ -61,6 +61,19 @@ async def _save_api_usage(
 async def process_session(session_id: str, video_id: str, tier: str, auto_summarize: bool = False):
     """Main processing pipeline — free captions or OpenAI API."""
     try:
+        # Guard: refuse to run the recorded pipeline on a live session.
+        # This can happen if yt-dlp didn't flag is_live=True at submission time,
+        # or if the retry endpoint is called on a session that was originally live.
+        async with AsyncSessionLocal() as db:
+            session_row = await db.get(Session, session_id)
+            if session_row and session_row.is_live:
+                await _update_status(
+                    session_id, "failed",
+                    "This is a live stream — it cannot be processed by the recorded-session pipeline. "
+                    "Re-submit the URL while the stream is active to use live transcription."
+                )
+                return
+
         await _update_status(session_id, "extracting")
 
         if tier == "free":
