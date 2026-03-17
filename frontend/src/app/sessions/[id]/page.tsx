@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo, use } from "react";
 import type ReactPlayerType from "react-player";
-import { ArrowLeft, AlertCircle, Loader2, Clock, Calendar, Tv2, Radio, StopCircle, ListOrdered, RotateCcw } from "lucide-react";
+import { ArrowLeft, AlertCircle, Loader2, Clock, Calendar, Tv2, Radio, StopCircle, ListOrdered, RotateCcw, Check, History } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
@@ -45,6 +45,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [retrying, setRetrying] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [backfillStatus, setBackfillStatus] = useState<"idle" | "running" | "complete" | "error">("idle");
+  const [backfillProgress, setBackfillProgress] = useState({ processed: 0, total: 0 });
 
   // Poll session status until complete/failed/live
   // retryCount is included so a manual retry restarts this effect cleanly
@@ -96,7 +98,22 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       try {
         const msg = JSON.parse(event.data);
         if (msg.type === "segments") {
+          // Live segments — append in arrival order (they are chronological)
           setSegments((prev) => [...prev, ...msg.data]);
+        } else if (msg.type === "backfill_start") {
+          setBackfillStatus("running");
+          setBackfillProgress({ processed: 0, total: msg.duration });
+        } else if (msg.type === "backfill_segments") {
+          // Backfill segments have earlier timestamps — sort so they slot in correctly
+          setSegments((prev) =>
+            [...prev, ...msg.data].sort((a, b) => a.start_time - b.start_time)
+          );
+          setBackfillProgress({ processed: msg.processed_seconds, total: msg.total_seconds });
+        } else if (msg.type === "backfill_complete") {
+          setBackfillStatus("complete");
+          setBackfillProgress((p) => ({ ...p, processed: p.total }));
+        } else if (msg.type === "backfill_error") {
+          setBackfillStatus("error");
         } else if (msg.type === "done" || msg.type === "error") {
           es.close();
         }
@@ -134,6 +151,8 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
       setSummary(null);
       setLoadingSession(true);
       setRetrying(false);
+      setBackfillStatus("idle");
+      setBackfillProgress({ processed: 0, total: 0 });
       setRetryCount((c) => c + 1);
     } catch {
       setRetrying(false);
@@ -314,6 +333,47 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
             )}
             {stopping ? "Stopping…" : "Stop"}
           </button>
+        </div>
+      )}
+
+      {/* Backfill banner — shown whenever a backfill was attempted */}
+      {backfillStatus !== "idle" && (
+        <div className={`rounded-xl p-4 flex items-center gap-3 border ${
+          backfillStatus === "running"
+            ? "bg-amber-50 border-amber-200"
+            : backfillStatus === "complete"
+            ? "bg-green-50 border-green-200"
+            : "bg-gray-50 border-gray-200"
+        }`}>
+          {backfillStatus === "running" ? (
+            <Loader2 className="w-5 h-5 text-amber-500 animate-spin flex-shrink-0" />
+          ) : backfillStatus === "complete" ? (
+            <Check className="w-5 h-5 text-green-600 flex-shrink-0" />
+          ) : (
+            <History className="w-5 h-5 text-gray-400 flex-shrink-0" />
+          )}
+          <div>
+            {backfillStatus === "running" ? (
+              <>
+                <p className="text-sm font-medium text-amber-800">
+                  Backfilling prior content
+                </p>
+                <p className="text-xs text-amber-600">
+                  {formatDuration(backfillProgress.processed)} of{" "}
+                  {formatDuration(backfillProgress.total)} processed — segments will appear above as they complete.
+                </p>
+              </>
+            ) : backfillStatus === "complete" ? (
+              <p className="text-sm font-medium text-green-800">
+                Backfill complete —{" "}
+                {formatDuration(backfillProgress.total)} of prior content added to transcript.
+              </p>
+            ) : (
+              <p className="text-sm text-gray-500">
+                Backfill unavailable for this stream (DVR window may not be accessible).
+              </p>
+            )}
+          </div>
         </div>
       )}
 

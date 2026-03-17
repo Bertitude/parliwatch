@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import time as _time
 import uuid
 import zipfile
 from pathlib import Path
@@ -148,7 +149,9 @@ async def create_session(
     await db.commit()
 
     if metadata.get("is_live"):
-        bg.add_task(process_live_stream, session_id, video_id)
+        release_ts = metadata.get("release_timestamp")
+        stream_elapsed = max(0.0, _time.time() - release_ts) if release_ts else 0.0
+        bg.add_task(process_live_stream, session_id, video_id, stream_elapsed)
     else:
         async def _queued_process():
             await run_queued(
