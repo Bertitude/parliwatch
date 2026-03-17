@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Loader2, RefreshCw, Trash2, Server, Monitor } from "lucide-react";
+import { Loader2, RefreshCw, ClipboardCopy, Check, Server, Monitor } from "lucide-react";
 import { getLogs } from "@/lib/api";
 
 type Service = "backend" | "frontend";
@@ -27,8 +27,15 @@ export default function LogsPage() {
   const [note, setNote]       = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [copied, setCopied] = useState(false);
   const bottomRef  = useRef<HTMLDivElement>(null);
   const timerRef   = useRef<NodeJS.Timeout | null>(null);
+
+  const handleCopy = useCallback(async () => {
+    await navigator.clipboard.writeText(lines.join("\n"));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [lines]);
 
   const fetchLogs = useCallback(async (svc: Service) => {
     try {
@@ -71,6 +78,14 @@ export default function LogsPage() {
             />
             Auto-scroll
           </label>
+          <button
+            onClick={handleCopy}
+            disabled={lines.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors disabled:opacity-40"
+          >
+            {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <ClipboardCopy className="w-3.5 h-3.5" />}
+            {copied ? "Copied!" : "Copy"}
+          </button>
           <button
             onClick={() => fetchLogs(service)}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
