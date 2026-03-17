@@ -9,6 +9,16 @@ export interface SessionMeta {
   status: string;
   transcription_tier: string;
   created_at: string;
+  queue_position: number;
+}
+
+export interface VideoPreview {
+  video_id: string;
+  title: string;
+  channel: string;
+  thumbnail: string;
+  duration: number;
+  is_live: boolean;
 }
 
 export interface SessionDetail {
@@ -26,6 +36,7 @@ export interface SessionDetail {
   transcription_tier: string;
   error_message: string | null;
   created_at: string;
+  queue_position: number;
 }
 
 export interface TranscriptSegment {
@@ -143,4 +154,10 @@ export function getBundleDownloadUrl(id: string): string {
 export async function stopLiveTranscription(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/sessions/${id}/stop`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to stop live transcription");
+}
+
+export async function previewUrl(url: string): Promise<VideoPreview> {
+  const res = await fetch(`${API_BASE}/api/preview?url=${encodeURIComponent(url)}`);
+  if (!res.ok) throw new Error("Could not fetch video info");
+  return res.json();
 }

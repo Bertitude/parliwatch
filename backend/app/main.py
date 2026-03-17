@@ -18,6 +18,7 @@ from .youtube import extract_video_id, get_video_metadata
 from .services.processor import process_session, generate_summary
 from .services.livestream import process_live_stream, subscribe_live, unsubscribe_live, request_stop
 from .services.summary_export import summary_to_md, summary_to_docx
+from .queue_manager import run_queued, queue_position
 
 
 @asynccontextmanager
@@ -148,7 +149,12 @@ async def create_session(
     if metadata.get("is_live"):
         bg.add_task(process_live_stream, session_id, video_id)
     else:
-        bg.add_task(process_session, session_id, video_id, req.transcription_tier, req.auto_summarize)
+        async def _queued_process():
+            await run_queued(
+                session_id,
+                process_session(session_id, video_id, req.transcription_tier, req.auto_summarize),
+            )
+        bg.add_task(_queued_process)
 
     return SessionResponse(
         session_id=session_id,
@@ -173,6 +179,7 @@ async def list_sessions(db: AsyncSession = Depends(get_db)):
             "status": s.status,
             "transcription_tier": s.transcription_tier,
             "created_at": s.created_at.isoformat() if s.created_at else None,
+            "queue_position": queue_position(s.id),
         }
         for s in sessions
     ]
@@ -199,6 +206,7 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
         "transcription_tier": session.transcription_tier,
         "error_message": session.error_message,
         "created_at": session.created_at.isoformat() if session.created_at else None,
+        "queue_position": queue_position(session.id),
     }
 
 
@@ -455,6 +463,30 @@ async def export_bundle(session_id: str, db: AsyncSession = Depends(get_db)):
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{fname}.zip"'},
     )
+
+
+@app.get("/api/preview")
+async def preview_url(url: str):
+    """
+    Fetch lightweight metadata (title, thumbnail, channel, duration) for a
+    YouTube URL without creating a session.  Used by the frontend to show a
+    confirmation card before the user submits.
+    """
+    video_id = extract_video_id(url)
+    if not video_id:
+        raise HTTPException(400, "Invalid YouTube URL")
+    try:
+        metadata = get_video_metadata(video_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {
+        "video_id": video_id,
+        "title": metadata.get("title"),
+        "channel": metadata.get("channel"),
+        "thumbnail": metadata.get("thumbnail"),
+        "duration": metadata.get("duration"),
+        "is_live": metadata.get("is_live", False),
+    }
 
 
 @app.get("/api/health")
