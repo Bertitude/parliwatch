@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import tempfile
@@ -28,7 +29,30 @@ def download_audio(video_id: str, output_dir: str = "") -> str:
     if os.path.exists(COOKIES_PATH):
         cmd[1:1] = ["--cookies", COOKIES_PATH]
 
-    subprocess.run(cmd, check=True)  # No timeout — sessions can be several hours long
+    try:
+        subprocess.run(cmd, check=True)  # No timeout — sessions can be several hours long
+    except subprocess.CalledProcessError as exc:
+        # If yt-dlp failed, check whether the video is actually a live stream so
+        # the error message is actionable rather than a raw exit code.
+        probe = subprocess.run(
+            ["yt-dlp", "--dump-json", "--no-download", "--no-check-formats",
+             f"https://www.youtube.com/watch?v={video_id}"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if probe.returncode == 0:
+            try:
+                meta = json.loads(probe.stdout)
+                if meta.get("is_live"):
+                    raise RuntimeError(
+                        "Cannot download audio: this video is currently live. "
+                        "Re-submit the URL to use the live transcription pipeline."
+                    ) from exc
+            except (json.JSONDecodeError, KeyError):
+                pass
+        raise RuntimeError(
+            f"yt-dlp failed (exit {exc.returncode}) — "
+            "ensure yt-dlp and ffmpeg are installed and the video is publicly accessible."
+        ) from exc
     return output_path
 
 

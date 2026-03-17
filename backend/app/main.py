@@ -313,12 +313,17 @@ async def retry_session(session_id: str, bg: BackgroundTasks, db: AsyncSession =
     session.error_message = None
     await db.commit()
 
-    async def _queued_retry():
-        await run_queued(
-            session_id,
-            process_session(session_id, session.video_id, session.transcription_tier, False),
-        )
-    bg.add_task(_queued_retry)
+    if session.is_live:
+        # Live sessions restart from the live edge; stream_elapsed=0 keeps it simple
+        # (backfill will cover any prior content if the DVR window is still available)
+        bg.add_task(process_live_stream, session_id, session.video_id, 0.0)
+    else:
+        async def _queued_retry():
+            await run_queued(
+                session_id,
+                process_session(session_id, session.video_id, session.transcription_tier, False),
+            )
+        bg.add_task(_queued_retry)
     return {"status": "pending", "session_id": session_id}
 
 
