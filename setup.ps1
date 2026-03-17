@@ -77,6 +77,35 @@ if (-not (Test-Path ".env")) {
     Write-OK ".env already exists"
 }
 
+# ── API Keys ───────────────────────────────────────────────────────────────────
+
+Write-Step "Configuring API keys..."
+Write-Host "    Press Enter to skip any key (you can add them later in backend\.env)" -ForegroundColor Gray
+Write-Host ""
+
+function Read-ApiKey($label, $envKey, $hint, $required = $false) {
+    $tag = if ($required) { "" } else { " (optional)" }
+    Write-Host "  $label$tag" -ForegroundColor White
+    Write-Host "  Get it at: $hint" -ForegroundColor Gray
+    $val = Read-Host "  Enter $envKey"
+    if ($val.Trim() -ne "") {
+        # Replace the placeholder line in .env
+        $envFile = Join-Path $PSScriptRoot "backend\.env"
+        $content = Get-Content $envFile -Raw
+        # Match key=anything (including the placeholder like sk-ant-...)
+        $content = $content -replace "(?m)^$envKey=.*$", "$envKey=$($val.Trim())"
+        Set-Content $envFile $content -NoNewline
+        Write-OK "$envKey saved"
+    } else {
+        Write-Warn "$envKey skipped — features requiring it won't work until set"
+    }
+    Write-Host ""
+}
+
+Read-ApiKey "Groq API Key"      "GROQ_API_KEY"      "https://console.groq.com      (free tier available)"
+Read-ApiKey "Anthropic API Key" "ANTHROPIC_API_KEY"  "https://console.anthropic.com (pay-as-you-go)"
+Read-ApiKey "OpenAI API Key"    "OPENAI_API_KEY"     "https://platform.openai.com   (pay-as-you-go)"
+
 # ── Frontend ───────────────────────────────────────────────────────────────────
 
 Write-Step "Setting up Next.js frontend..."
@@ -97,15 +126,11 @@ Write-Host "=====================================" -ForegroundColor Green
 Write-Host "  Setup complete!" -ForegroundColor Green
 Write-Host "=====================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "Next steps:" -ForegroundColor White
-Write-Host ""
-Write-Host "  1. Add your API keys to backend\.env:" -ForegroundColor White
-Write-Host "       OPENAI_API_KEY    — enhanced transcription (optional)" -ForegroundColor Gray
-Write-Host "       ANTHROPIC_API_KEY — AI summaries (optional)" -ForegroundColor Gray
-Write-Host "       GROQ_API_KEY      — live stream transcription (optional)" -ForegroundColor Gray
-Write-Host ""
-Write-Host "  2. Start the app:" -ForegroundColor White
+Write-Host "  To start the app:" -ForegroundColor White
 Write-Host "       .\start.bat" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  3. Open http://localhost:3000" -ForegroundColor White
+Write-Host "  To add or change API keys later:" -ForegroundColor White
+Write-Host "       notepad backend\.env" -ForegroundColor Gray
+Write-Host ""
+Write-Host "  Open: http://localhost:3000" -ForegroundColor White
 Write-Host ""
