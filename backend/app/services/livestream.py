@@ -201,7 +201,7 @@ async def process_live_stream(session_id: str, video_id: str) -> None:
             stderr_tail = "\n".join(ffmpeg_stderr_lines[-20:])
             print(f"[live] ffmpeg died immediately rc={rc}\nSTDERR:\n{stderr_tail}", flush=True)
             raise RuntimeError(f"ffmpeg exited immediately (rc={rc}): {stderr_tail[:300]}")
-        print(f"[live] ffmpeg still running after 5s check ✓", flush=True)
+        print(f"[live] ffmpeg still running after 5s check OK", flush=True)
 
         chunk_index = 0
         time_offset = 0.0
