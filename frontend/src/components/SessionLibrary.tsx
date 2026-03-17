@@ -1,32 +1,105 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Clock, CheckCircle, AlertCircle, Loader2, Film, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  Film,
+  ChevronLeft,
+  ChevronRight,
+  Radio,
+  ListOrdered,
+} from "lucide-react";
 import { listSessions, type SessionMeta } from "@/lib/api";
 import { formatDuration } from "@/lib/utils";
 
 const PAGE_SIZE = 6;
+const POLL_INTERVAL = 3000;
 
-const STATUS_ICONS = {
-  pending: <Loader2 className="w-4 h-4 text-gray-400 animate-spin" />,
-  extracting: <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />,
-  transcribing: <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />,
-  summarizing: <Loader2 className="w-4 h-4 text-purple-500 animate-spin" />,
-  complete: <CheckCircle className="w-4 h-4 text-green-500" />,
-  failed: <AlertCircle className="w-4 h-4 text-red-500" />,
-};
+/** Statuses that mean the job is still running and we should keep polling. */
+const ACTIVE_STATUSES = new Set(["pending", "extracting", "transcribing", "summarizing", "live"]);
+
+function StatusBadge({ session }: { session: SessionMeta }) {
+  const { status, queue_position } = session;
+
+  if (queue_position > 0) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-amber-600 font-medium">
+        <ListOrdered className="w-3.5 h-3.5" />
+        Queue #{queue_position}
+      </span>
+    );
+  }
+
+  switch (status) {
+    case "complete":
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-green-600">
+          <CheckCircle className="w-3.5 h-3.5" />
+          Complete
+        </span>
+      );
+    case "failed":
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-red-500">
+          <AlertCircle className="w-3.5 h-3.5" />
+          Failed
+        </span>
+      );
+    case "live":
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-red-600 font-semibold animate-pulse">
+          <Radio className="w-3.5 h-3.5" />
+          Live
+        </span>
+      );
+    default:
+      return (
+        <span className="inline-flex items-center gap-1 text-xs text-blue-500">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          <span className="capitalize">{status}</span>
+        </span>
+      );
+  }
+}
 
 export default function SessionLibrary() {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    listSessions()
-      .then(setSessions)
-      .catch(() => setSessions([]))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        const data = await listSessions();
+        if (cancelled) return;
+        setSessions(data);
+        setLoading(false);
+
+        // Keep polling while any job is still in-progress or queued
+        const hasActive = data.some(
+          (s) => ACTIVE_STATUSES.has(s.status) || s.queue_position > 0
+        );
+        if (hasActive) {
+          timerRef.current = setTimeout(load, POLL_INTERVAL);
+        }
+      } catch {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, []);
 
   if (loading) {
@@ -60,12 +133,35 @@ export default function SessionLibrary() {
             className="bg-white rounded-xl border border-gray-200 hover:border-parliament-navy/40 hover:shadow-md transition-all overflow-hidden group"
           >
             {s.thumbnail_url && (
-              <div className="aspect-video bg-gray-100 overflow-hidden">
+              <div className="aspect-video bg-gray-100 overflow-hidden relative">
                 <img
                   src={s.thumbnail_url}
                   alt={s.title}
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                 />
+                {/* Spinner overlay for in-progress jobs */}
+                {ACTIVE_STATUSES.has(s.status) && s.status !== "live" && (
+                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                    <Loader2 className="w-8 h-8 text-white animate-spin" />
+                  </div>
+                )}
+                {/* Queue position overlay */}
+                {s.queue_position > 0 && (
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                    <div className="text-center text-white">
+                      <ListOrdered className="w-6 h-6 mx-auto mb-1 opacity-80" />
+                      <p className="text-xs font-semibold">Queue #{s.queue_position}</p>
+                    </div>
+                  </div>
+                )}
+                {/* Live badge */}
+                {s.status === "live" && (
+                  <div className="absolute top-2 left-2">
+                    <span className="inline-flex items-center gap-1 bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded animate-pulse">
+                      <Radio className="w-3 h-3" /> LIVE
+                    </span>
+                  </div>
+                )}
               </div>
             )}
             <div className="p-4">
@@ -78,10 +174,7 @@ export default function SessionLibrary() {
                   <Clock className="w-3.5 h-3.5" />
                   <span>{s.duration ? formatDuration(s.duration) : "—"}</span>
                 </div>
-                <div className="flex items-center gap-1">
-                  {STATUS_ICONS[s.status as keyof typeof STATUS_ICONS] ?? null}
-                  <span className="capitalize">{s.status}</span>
-                </div>
+                <StatusBadge session={s} />
               </div>
             </div>
           </Link>
