@@ -71,7 +71,7 @@ def _summarize_single_with_retry(formatted: str, metadata: dict, max_retries: in
         try:
             response = client.messages.create(
                 model="claude-sonnet-4-6",
-                max_tokens=8000,
+                max_tokens=16000,
                 system=SUMMARY_SYSTEM_PROMPT,
                 messages=[
                     {
@@ -169,15 +169,19 @@ def _chunked_summarization(segments: list[dict], metadata: dict) -> tuple[dict, 
     assembly_prompt = (
         f"Assemble these {len(chunk_summaries)} section summaries "
         f"from '{metadata.get('title', 'Unknown')}' into a unified summary.\n\n"
+        f"IMPORTANT: Be concise. Keep executive_summary under 200 words. "
+        f"Merge duplicate topics; aim for at most 12 topics total. "
+        f"The full JSON response MUST be complete and valid — do not truncate.\n\n"
         f"{json.dumps(chunk_summaries, indent=2)}"
     )
 
     last_exc: Exception | None = None
+    raw = ""
     for attempt in range(3):
         try:
             assembly = client.messages.create(
                 model="claude-sonnet-4-6",
-                max_tokens=8000,
+                max_tokens=16000,
                 system=SUMMARY_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": assembly_prompt}],
             )
@@ -189,13 +193,33 @@ def _chunked_summarization(segments: list[dict], metadata: dict) -> tuple[dict, 
             return result, total_cost
         except (ValueError, json.JSONDecodeError) as exc:
             last_exc = exc
-            raw_preview = repr(raw[:300]) if "raw" in dir() else "n/a"
+            raw_preview = repr(raw[:300]) if raw else "n/a"
             logger.warning(f"[summarizer] assembly attempt {attempt + 1}/3 failed: {exc} | raw={raw_preview}")
             if attempt < 2:
                 time.sleep(2 ** attempt)
 
-    logger.error(f"[summarizer] assembly failed after 3 attempts: {last_exc}")
-    raise ValueError(f"Summary assembly failed after 3 attempts: {last_exc}") from last_exc
+    # All assembly attempts failed — stitch chunk summaries together directly
+    # so the session still gets a usable summary rather than silently failing.
+    logger.error(f"[summarizer] assembly failed after 3 attempts, using chunk fallback: {last_exc}")
+    return _fallback_from_chunks(chunk_summaries), total_cost
+
+
+def _fallback_from_chunks(chunk_summaries: list[dict]) -> dict:
+    """Build a best-effort summary by merging chunk dicts when Claude assembly fails."""
+    exec_parts = [c.get("summary") or c.get("topic_title", "") for c in chunk_summaries if c.get("summary") or c.get("topic_title")]
+    topics, decisions, actions, speakers = [], [], [], []
+    for c in chunk_summaries:
+        topics.extend(c.get("topics", []))
+        decisions.extend(c.get("decisions", []))
+        actions.extend(c.get("actions", []))
+        speakers.extend(c.get("speakers", []))
+    return {
+        "executive_summary": " ".join(exec_parts)[:1000] if exec_parts else "Summary assembled from session sections.",
+        "topics": topics[:12],
+        "decisions": decisions,
+        "actions": actions,
+        "speakers": speakers,
+    }
 
 
 def _split_by_time(segments: list[dict], target_minutes: int = 20) -> list[list[dict]]:
