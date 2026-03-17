@@ -43,9 +43,11 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
   const [summaryFailed, setSummaryFailed] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   // Poll session status until complete/failed/live
+  // retryCount is included so a manual retry restarts this effect cleanly
   useEffect(() => {
     let timer: NodeJS.Timeout;
 
@@ -81,7 +83,7 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
     fetchSession();
     return () => clearTimeout(timer);
-  }, [id]);
+  }, [id, retryCount]);
 
   // Subscribe to SSE for real-time segments when session is live
   useEffect(() => {
@@ -125,10 +127,14 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
     setRetrying(true);
     try {
       await retrySession(id);
-      // Reset local state and restart polling
+      // Reset local state then bump retryCount — the polling effect depends on
+      // it so incrementing re-runs the effect and resumes polling immediately.
       setError(null);
+      setSegments([]);
+      setSummary(null);
       setLoadingSession(true);
       setRetrying(false);
+      setRetryCount((c) => c + 1);
     } catch {
       setRetrying(false);
     }
