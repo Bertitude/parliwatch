@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import pkg from "../../package.json";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -31,7 +32,7 @@ export default function RootLayout({
         </header>
         <main className="max-w-7xl mx-auto px-4 py-6">{children}</main>
         <footer className="text-center text-gray-400 text-xs py-6 mt-8 border-t">
-          ParliWatch v2.0 — API-First Architecture
+          ParliWatch v{pkg.version}
         </footer>
       </body>
     </html>
