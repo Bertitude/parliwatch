@@ -12,8 +12,9 @@ import {
   ChevronRight,
   Radio,
   ListOrdered,
+  RotateCcw,
 } from "lucide-react";
-import { listSessions, type SessionMeta } from "@/lib/api";
+import { listSessions, retrySession, type SessionMeta } from "@/lib/api";
 import { formatDuration } from "@/lib/utils";
 
 const PAGE_SIZE = 6;
@@ -70,7 +71,9 @@ export default function SessionLibrary() {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const loadRef = useRef<() => Promise<void>>();
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +97,7 @@ export default function SessionLibrary() {
       }
     };
 
+    loadRef.current = load;
     load();
 
     return () => {
@@ -101,6 +105,25 @@ export default function SessionLibrary() {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
+
+  const handleRetry = async (e: React.MouseEvent, sessionId: string) => {
+    e.preventDefault(); // don't follow the Link
+    e.stopPropagation();
+    setRetryingId(sessionId);
+    try {
+      await retrySession(sessionId);
+      // Optimistically flip status and restart polling
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, status: "pending" } : s))
+      );
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (loadRef.current) timerRef.current = setTimeout(loadRef.current, POLL_INTERVAL);
+    } catch {
+      // leave as-is; user can try again
+    } finally {
+      setRetryingId(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -174,7 +197,24 @@ export default function SessionLibrary() {
                   <Clock className="w-3.5 h-3.5" />
                   <span>{s.duration ? formatDuration(s.duration) : "—"}</span>
                 </div>
-                <StatusBadge session={s} />
+                <div className="flex items-center gap-2">
+                  <StatusBadge session={s} />
+                  {s.status === "failed" && (
+                    <button
+                      onClick={(e) => handleRetry(e, s.id)}
+                      disabled={retryingId === s.id}
+                      title="Retry transcription"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-red-50 hover:bg-red-100 text-red-600 text-xs font-medium transition-colors disabled:opacity-50"
+                    >
+                      {retryingId === s.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-3 h-3" />
+                      )}
+                      Retry
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           </Link>
