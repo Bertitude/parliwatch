@@ -296,6 +296,28 @@ async def trigger_summarize(
     return {"status": "summarizing", "session_id": session_id}
 
 
+@app.post("/api/sessions/{session_id}/retry")
+async def retry_session(session_id: str, bg: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """Reset a failed session and re-queue its transcription job."""
+    session = await db.get(Session, session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    if session.status != "failed":
+        raise HTTPException(400, f"Only failed sessions can be retried (current status: '{session.status}')")
+
+    session.status = "pending"
+    session.error_message = None
+    await db.commit()
+
+    async def _queued_retry():
+        await run_queued(
+            session_id,
+            process_session(session_id, session.video_id, session.transcription_tier, False),
+        )
+    bg.add_task(_queued_retry)
+    return {"status": "pending", "session_id": session_id}
+
+
 @app.post("/api/sessions/{session_id}/stop")
 async def stop_live_stream(session_id: str, db: AsyncSession = Depends(get_db)):
     """Stop a live transcription session gracefully."""

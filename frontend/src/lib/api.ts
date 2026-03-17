@@ -161,3 +161,8 @@ export async function previewUrl(url: string): Promise<VideoPreview> {
   if (!res.ok) throw new Error("Could not fetch video info");
   return res.json();
 }
+
+export async function retrySession(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/sessions/${id}/retry`, { method: "POST" });
+  if (!res.ok) throw new Error("Failed to retry session");
+}
