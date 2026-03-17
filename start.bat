@@ -32,9 +32,9 @@ start "ParliWatch - Backend" cmd /k "cd /d "%~dp0backend" && venv\Scripts\activa
 :: Give backend a moment to begin starting
 timeout /t 2 /nobreak >nul
 
-:: Start frontend in a new terminal window (PORT inherited from env)
+:: Start frontend in a new terminal window, explicitly passing PORT so Next.js sees it
 echo [3/3] Starting frontend (port !FRONTEND_PORT!)...
-start "ParliWatch - Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
+start "ParliWatch - Frontend" cmd /k "cd /d "%~dp0frontend" && set PORT=!FRONTEND_PORT! && npm run dev"
 
 echo.
 echo =====================================
