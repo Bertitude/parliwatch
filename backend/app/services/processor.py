@@ -184,4 +184,6 @@ async def generate_summary(session_id: str):
 
     except Exception as e:
         logger.exception(f"generate_summary failed for {session_id}")
-        await _update_status(session_id, "failed", str(e))
+        # Keep the session as "complete" — the transcript is already saved.
+        # Only the summary failed; the user can retry it manually from the session page.
+        await _update_status(session_id, "complete")

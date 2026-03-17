@@ -63,36 +63,53 @@ def format_transcript(segments: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _summarize_single_with_retry(formatted: str, metadata: dict, max_retries: int = 3) -> tuple[dict, float]:
+    """Summarize a short-enough transcript in one shot, retrying on bad JSON."""
+    cost = 0.0
+    last_exc: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=8000,
+                system=SUMMARY_SYSTEM_PROMPT,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Session: {metadata.get('title', 'Unknown')}\n"
+                            f"Channel: {metadata.get('channel', 'Unknown')}\n"
+                            f"Duration: {metadata.get('duration', 0)}s\n\n"
+                            f"TRANSCRIPT:\n{formatted}"
+                        ),
+                    }
+                ],
+            )
+            raw = response.content[0].text if response.content else ""
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+            cost += (input_tokens * 3 / 1_000_000) + (output_tokens * 15 / 1_000_000)
+            return _parse_claude_json(raw), cost
+        except (ValueError, json.JSONDecodeError) as exc:
+            last_exc = exc
+            raw_preview = repr(raw[:300]) if "raw" in dir() else "n/a"
+            logger.warning(
+                f"[summarizer] single attempt {attempt + 1}/{max_retries} failed: {exc} | raw={raw_preview}"
+            )
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+
+    logger.error(f"[summarizer] all {max_retries} single-shot attempts failed: {last_exc}")
+    raise ValueError(f"Summary generation failed after {max_retries} attempts: {last_exc}") from last_exc
+
+
 def summarize_session(session_id: str, segments: list[dict], metadata: dict) -> dict:
     formatted = format_transcript(segments)
 
     if len(formatted) > 120_000:
         return _chunked_summarization(segments, metadata)
 
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=8000,
-        system=SUMMARY_SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Session: {metadata.get('title', 'Unknown')}\n"
-                    f"Channel: {metadata.get('channel', 'Unknown')}\n"
-                    f"Duration: {metadata.get('duration', 0)}s\n\n"
-                    f"TRANSCRIPT:\n{formatted}"
-                ),
-            }
-        ],
-    )
-
-    result = _parse_claude_json(response.content[0].text)
-
-    input_tokens = response.usage.input_tokens
-    output_tokens = response.usage.output_tokens
-    cost = (input_tokens * 3 / 1_000_000) + (output_tokens * 15 / 1_000_000)
-
-    return result, cost
+    return _summarize_single_with_retry(formatted, metadata)
 
 
 def _summarize_chunk_with_retry(formatted: str, max_retries: int = 3) -> tuple[dict, float]:
@@ -149,27 +166,36 @@ def _chunked_summarization(segments: list[dict], metadata: dict) -> tuple[dict, 
         total_cost += chunk_cost
         logger.info(f"[summarizer] chunk {i + 1}/{len(chunks)} done")
 
-    assembly = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=8000,
-        system=SUMMARY_SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Assemble these {len(chunk_summaries)} section summaries "
-                    f"from '{metadata.get('title', 'Unknown')}' into a unified summary.\n\n"
-                    f"{json.dumps(chunk_summaries, indent=2)}"
-                ),
-            }
-        ],
+    assembly_prompt = (
+        f"Assemble these {len(chunk_summaries)} section summaries "
+        f"from '{metadata.get('title', 'Unknown')}' into a unified summary.\n\n"
+        f"{json.dumps(chunk_summaries, indent=2)}"
     )
-    result = _parse_claude_json(assembly.content[0].text)
-    input_t = assembly.usage.input_tokens
-    output_t = assembly.usage.output_tokens
-    total_cost += (input_t * 3 / 1_000_000) + (output_t * 15 / 1_000_000)
 
-    return result, total_cost
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            assembly = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=8000,
+                system=SUMMARY_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": assembly_prompt}],
+            )
+            raw = assembly.content[0].text if assembly.content else ""
+            result = _parse_claude_json(raw)
+            input_t = assembly.usage.input_tokens
+            output_t = assembly.usage.output_tokens
+            total_cost += (input_t * 3 / 1_000_000) + (output_t * 15 / 1_000_000)
+            return result, total_cost
+        except (ValueError, json.JSONDecodeError) as exc:
+            last_exc = exc
+            raw_preview = repr(raw[:300]) if "raw" in dir() else "n/a"
+            logger.warning(f"[summarizer] assembly attempt {attempt + 1}/3 failed: {exc} | raw={raw_preview}")
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+
+    logger.error(f"[summarizer] assembly failed after 3 attempts: {last_exc}")
+    raise ValueError(f"Summary assembly failed after 3 attempts: {last_exc}") from last_exc
 
 
 def _split_by_time(segments: list[dict], target_minutes: int = 20) -> list[list[dict]]:
