@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { Link, Zap, Mic, Users, Info } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Link, Zap, Mic, Users, Info, Loader2, Radio, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { previewUrl, type VideoPreview } from "@/lib/api";
+import { formatDuration } from "@/lib/utils";
 
 interface URLInputProps {
   onSubmit: (url: string, tier: string, autoSummarize: boolean) => void;
@@ -17,7 +19,6 @@ const TIERS = [
     description: "YouTube auto-captions (instant, no cost)",
     icon: Zap,
     cost: "$0.00",
-    color: "border-green-400 bg-green-50",
     selected: "ring-2 ring-green-500 border-green-500",
   },
   {
@@ -26,7 +27,6 @@ const TIERS = [
     description: "Groq transcription (~$0.003/min)",
     icon: Mic,
     cost: "~$0.18/hr",
-    color: "border-blue-400 bg-blue-50",
     selected: "ring-2 ring-blue-500 border-blue-500",
   },
   {
@@ -35,15 +35,48 @@ const TIERS = [
     description: "Groq with speaker labels (~$0.006/min)",
     icon: Users,
     cost: "~$0.36/hr",
-    color: "border-purple-400 bg-purple-50",
     selected: "ring-2 ring-purple-500 border-purple-500",
   },
 ];
+
+const YOUTUBE_RE =
+  /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:watch\?v=|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
 
 export default function URLInput({ onSubmit, loading, error }: URLInputProps) {
   const [url, setUrl] = useState("");
   const [tier, setTier] = useState("free");
   const [autoSummarize, setAutoSummarize] = useState(false);
+  const [preview, setPreview] = useState<VideoPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Debounce preview fetch whenever the URL changes
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const trimmed = url.trim();
+
+    if (!YOUTUBE_RE.test(trimmed)) {
+      setPreview(null);
+      setPreviewLoading(false);
+      return;
+    }
+
+    setPreviewLoading(true);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const data = await previewUrl(trimmed);
+        setPreview(data);
+      } catch {
+        setPreview(null);
+      } finally {
+        setPreviewLoading(false);
+      }
+    }, 600);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [url]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,6 +107,50 @@ export default function URLInput({ onSubmit, loading, error }: URLInputProps) {
             />
           </div>
         </div>
+
+        {/* Video preview card */}
+        {(previewLoading || preview) && (
+          <div className="rounded-xl border border-gray-200 overflow-hidden bg-gray-50">
+            {previewLoading ? (
+              <div className="flex items-center gap-3 p-4 text-sm text-gray-500">
+                <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+                Fetching video info…
+              </div>
+            ) : preview ? (
+              <div className="flex gap-4 p-3">
+                {/* Thumbnail */}
+                <div className="relative flex-shrink-0 w-32 rounded-lg overflow-hidden bg-gray-200 aspect-video">
+                  {preview.thumbnail ? (
+                    <img
+                      src={preview.thumbnail}
+                      alt={preview.title}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : null}
+                  {preview.is_live && (
+                    <span className="absolute top-1 left-1 inline-flex items-center gap-1 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
+                      <Radio className="w-2.5 h-2.5" /> LIVE
+                    </span>
+                  )}
+                </div>
+
+                {/* Meta */}
+                <div className="flex-1 min-w-0 py-0.5">
+                  <p className="text-sm font-semibold text-gray-900 line-clamp-2 leading-snug mb-1">
+                    {preview.title}
+                  </p>
+                  <p className="text-xs text-gray-500 mb-2">{preview.channel}</p>
+                  {preview.duration ? (
+                    <div className="inline-flex items-center gap-1 text-xs text-gray-400">
+                      <Clock className="w-3 h-3" />
+                      {formatDuration(preview.duration)}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
 
         {/* Tier selector */}
         <div>

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo, use } from "react";
 import type ReactPlayerType from "react-player";
-import { ArrowLeft, AlertCircle, Loader2, Clock, Calendar, Tv2, Radio, StopCircle } from "lucide-react";
+import { ArrowLeft, AlertCircle, Loader2, Clock, Calendar, Tv2, Radio, StopCircle, ListOrdered } from "lucide-react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
@@ -225,13 +225,34 @@ export default function SessionPage({ params }: { params: Promise<{ id: string }
 
       {/* Processing state */}
       {isPending && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center gap-3">
-          <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
+        <div className={`rounded-xl p-4 flex items-center gap-3 border ${
+          session?.queue_position > 0
+            ? "bg-amber-50 border-amber-200"
+            : "bg-blue-50 border-blue-200"
+        }`}>
+          {session?.queue_position > 0 ? (
+            <ListOrdered className="w-5 h-5 text-amber-500 flex-shrink-0" />
+          ) : (
+            <Loader2 className="w-5 h-5 text-blue-500 animate-spin flex-shrink-0" />
+          )}
           <div>
-            <p className="text-sm font-medium text-blue-800 capitalize">
-              {session?.status ?? "Processing"}...
-            </p>
-            <p className="text-xs text-blue-600">This page will update automatically.</p>
+            {session?.queue_position > 0 ? (
+              <>
+                <p className="text-sm font-medium text-amber-800">
+                  Queued — position #{session.queue_position}
+                </p>
+                <p className="text-xs text-amber-600">
+                  Waiting for another job to finish. This page will update automatically.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-medium text-blue-800 capitalize">
+                  {session?.status ?? "Processing"}…
+                </p>
+                <p className="text-xs text-blue-600">This page will update automatically.</p>
+              </>
+            )}
           </div>
         </div>
       )}
