@@ -293,8 +293,13 @@ async def trigger_summarize(
     session = await db.get(Session, session_id)
     if not session:
         raise HTTPException(404, "Session not found")
-    if session.status not in ("complete",):
+    if session.status not in ("complete", "summarizing"):
         raise HTTPException(400, "Transcript must be complete before summarizing")
+
+    # Reset to "complete" first so a stuck "summarizing" session starts clean
+    if session.status == "summarizing":
+        session.status = "complete"
+        await db.commit()
 
     bg.add_task(generate_summary, session_id)
     return {"status": "summarizing", "session_id": session_id}
