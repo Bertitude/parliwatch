@@ -38,5 +38,6 @@ def get_video_metadata(video_id: str) -> dict:
         "upload_date": data.get("upload_date"),
         "is_live": data.get("is_live", False),
         "was_live": data.get("was_live", False),
+        "release_timestamp": data.get("release_timestamp"),  # Unix epoch stream started; None for VODs
         "description": (data.get("description") or "")[:500],
     }
