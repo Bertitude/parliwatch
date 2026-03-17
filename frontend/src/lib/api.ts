@@ -166,3 +166,12 @@ export async function retrySession(id: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/sessions/${id}/retry`, { method: "POST" });
   if (!res.ok) throw new Error("Failed to retry session");
 }
+
+export async function getLogs(
+  service: "backend" | "frontend",
+  lines = 200
+): Promise<{ service: string; lines: string[]; total?: number; note?: string }> {
+  const res = await fetch(`${API_BASE}/api/logs?service=${service}&lines=${lines}`);
+  if (!res.ok) throw new Error("Failed to fetch logs");
+  return res.json();
+}
